@@ -49,6 +49,9 @@ bank_data_juice <- bank_data[as.integer(row.names(cluster_model$medoids)), -whic
 bank_data <- bank_data[ -which(names(bank_data) == "__dummy response")]
 ```
 
+This is abuse of `model.matrix` irks me. I wish for `expandFactors()`.
+
+
 #Compare Column variance
 Numeric variables are simple. There is a choice to make about summarising the variation of factors. For now I choose the 'Deviation from Mode' method which is the average deviation from the model frequency.
 ```{r}
