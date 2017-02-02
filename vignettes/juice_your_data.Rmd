@@ -1,0 +1,88 @@
+---
+title: "Juicing Your Data"
+author: "Miles McBain"
+date: "27 January 2017"
+output: html_document
+---
+
+```{r}
+library(cluster)
+library(readr)
+library(dplyr)
+```
+
+#Introduction
+This is an ongoing experiment into dataset row reduction techniques which will form the first plank of a project to make data munging easier. The plan is to turn this into a small package with a simple/fast API.
+
+#Read data
+```{r}
+bank_data <- read_csv2(
+                "./tests/testthat/bank-additional-full.csv",
+                guess_max = 10000,
+                )
+
+bank_data <-
+    bank_data %>%
+    select(-duration) %>%
+    mutate_if(is.character, as.factor)
+```
+
+#Juice the data 
+Only around 30 rows of data can comfortably fit on my screeen.  
+
+We reduce the dataset down to 30 rows which are the 30 centres of k=30 kmediods clustering. There's some stuffing around with converting factors to indicators using model.matrix, which necessitates the introduction of a dummy response for the formula argument.
+
+```{r}
+#Add a dummy response
+bank_data$`__dummy response` <- 0
+bank_matrix <- model.matrix(object = `__dummy response` ~ ., bank_data)
+
+cluster_model <- clara(x = bank_matrix, 
+                       metric = "manhattan", 
+                       stand = TRUE, 
+                       k = 30, 
+                       correct.d = TRUE,
+                       samples = 10,
+                       medoids.x = TRUE)
+
+bank_data_juice <- bank_data[as.integer(row.names(cluster_model$medoids)), -which(names(bank_data) == "__dummy response")]
+bank_data <- bank_data[ -which(names(bank_data) == "__dummy response")]
+```
+
+#Compare Column variance
+Numeric variables are simple. There is a choice to make about summarising the variation of factors. For now I choose the 'Deviation from Mode' method which is the average deviation from the model frequency.
+```{r}
+mode_deviation <- function(vec){table(vec) %>% qualvar::DM()}
+
+comp_vars <-
+    bind_rows(
+        bind_cols(
+            bank_data %>% select_if(is.factor) %>% map(mode_deviation),
+            bank_data %>% select_if(is.numeric) %>% map(sd)
+            ),
+        bind_cols(
+            bank_data_juice %>% select_if(is.factor) %>% map(mode_deviation),
+            bank_data_juice %>% select_if(is.numeric) %>% map(sd)
+            )
+    )
+comp_vars %>% View()
+
+```
+
+## Create Juice Index
+Single number summaries are snazzier. I propose taking the median of the ratios of variance measures before and after juicing. "Median Proportion of Variance Retained":
+
+```{r}
+apply(comp_vars[2,]/comp_vars[1,], MARGIN = 1, median)
+```
+
+Could also plot:
+```{r}
+hist(t(comp_vars[2,]/comp_vars[1,]), breaks = 20)
+```
+
+The 2 - 2.5 cases correspond to categorical variables where the proportion not in the mode category has increased. This makes sense when you try to retain variety of categories as the number of rows decreases. The delta in the mode category would be the biggest. This suggests I need to revisit the choice of categorical variation index. 
+
+The index needs to be such that a 1 primarly favours variety of categories. The distribution of them is secondary concern. Could just use a count of the levels?
+
+
